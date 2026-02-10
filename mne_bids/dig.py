@@ -19,6 +19,7 @@ from mne.utils import (
     get_subjects_dir,
     logger,
 )
+from mne._fiff._digitization import DigPoint
 
 from mne_bids._fileio import _open_lock
 from mne_bids.config import (
@@ -675,6 +676,8 @@ def _read_dig_bids(electrodes_fpath, coordsystem_fpath, datatype, raw):
             message=".*nasion not found",
             module="mne",
         )
+
+        _ensure_fiducials_ctf_head(montage.dig)
         raw.set_montage(montage, on_missing="warn")
 
     # put back in unknown for unknown coordinate frame
@@ -858,3 +861,45 @@ def convert_montage_to_mri(montage, subject, subjects_dir=None, verbose=None):
             ras_vox_trans, vox_mri_trans, fro="ras", to="mri"
         )
     )
+
+
+_cardinal_ident_mapping = {
+    FIFF.FIFFV_POINT_NASION: "nasion",
+    FIFF.FIFFV_POINT_LPA: "lpa",
+    FIFF.FIFFV_POINT_RPA: "rpa",
+}
+
+def _ensure_fiducials_ctf_head(dig):
+    # Ensure that there are all three fiducials in the ctf_head coord frame
+    fids = dict()
+    for d in dig:
+        if d["kind"] == FIFF.FIFFV_POINT_CARDINAL:
+            name = _cardinal_ident_mapping.get(d["ident"], None)
+            if name is not None:
+                fids[name] = d
+    radius = None
+    mults = dict(
+        lpa=[0, 1, 0],
+        rpa=[0, -1, 0],
+        nasion=[1, 0, 0],
+    )
+    for ident, name in _cardinal_ident_mapping.items():
+        if name not in fids:
+            if radius is None:
+                radius = [
+                    np.linalg.norm(d["r"])
+                    for d in dig
+                    if d["coord_frame"] == FIFF.FIFFV_MNE_COORD_CTF_HEAD
+                    and not np.isnan(d["r"]).any()
+                ]
+                if not radius:
+                    return  # can't complete, no head points
+                radius = np.mean(radius)
+            dig.append(
+                DigPoint(
+                    kind=FIFF.FIFFV_POINT_CARDINAL,
+                    ident=ident,
+                    r=np.array(mults[name], float) * radius,
+                    coord_frame=FIFF.FIFFV_MNE_COORD_CTF_HEAD,
+                )
+            )
