@@ -21,6 +21,7 @@ from mne_bids._fileio import _open_lock
 from mne_bids.config import (
     ALLOWED_DATATYPE_EXTENSIONS,
     ANNOTATIONS_TO_KEEP,
+    UNITS_BIDS_TO_FIFF_MAP,
     _map_options,
     reader,
 )
@@ -130,6 +131,8 @@ def _read_events(events, event_id, raw, bids_path=None):
     all_desc : dict
         A dictionary with the keys corresponding to the event descriptions and
         the values to the event IDs.
+    extras : list[dict] | None
+        The extras stored on the annotations, if available.
 
     """
     # retrieve events
@@ -245,7 +248,13 @@ def _read_events(events, event_id, raw, bids_path=None):
             'labels beginning with "rest".'
         )
 
-    return all_events, all_dur, all_desc
+    extras = getattr(raw.annotations, "extras", None)
+    if extras is not None:
+        extras = list(extras)
+        if len(extras) == 0:
+            extras = None
+
+    return all_events, all_dur, all_desc, extras
 
 
 def _verbose_list_index(lst, val, *, allow_all=False):
@@ -701,10 +710,20 @@ def events_file_to_annotation_kwargs(events_fname: str | Path, *, verbose=None) 
         }
     )
     if extra_columns:
-        extras = [
-            dict(zip(extra_columns, values))
-            for values in zip(*[events_dict[col] for col in extra_columns])
-        ]
+        # infer types (int, float or str)
+        for col in extra_columns:
+            vals = [str(v) for v in events_dict[col]]
+            try:
+                events_dict[col] = [int(v) for v in vals]
+            except ValueError:
+                try:
+                    events_dict[col] = [float(v) for v in vals]
+                except ValueError:
+                    events_dict[col] = vals
+            extras = [
+                dict(zip(extra_columns, values))
+                for values in zip(*[events_dict[col] for col in extra_columns])
+            ]
 
     return {
         "onset": ons,
@@ -894,6 +913,15 @@ def _handle_channels_reading(channels_fname, raw, on_ch_mismatch="raise"):
     raw.set_channel_types(
         channel_type_bids_mne_map_available_channels, on_unit_change="ignore"
     )
+
+    # Set channel units based on channels.tsv
+    if "units" in channels_dict:
+        ch_names_tsv = channels_dict["name"]
+        units_tsv = channels_dict["units"]
+        for ch_name, unit_str in zip(ch_names_tsv, units_tsv):
+            if ch_name in raw.ch_names and unit_str in UNITS_BIDS_TO_FIFF_MAP:
+                ch_idx = raw.ch_names.index(ch_name)
+                raw.info["chs"][ch_idx]["unit"] = UNITS_BIDS_TO_FIFF_MAP[unit_str]
 
     # Set bad channels based on _channels.tsv sidecar
     if "status" in channels_dict:
@@ -1143,14 +1171,14 @@ def read_raw_bids(
         bids_path, suffix="coordsystem", extension=".json", on_error=on_error
     )
     if electrodes_fname is not None:
+        if coordsystem_fname is None:
+            raise RuntimeError(
+                f"BIDS mandates that the coordsystem.json "
+                f"should exist if electrodes.tsv does. "
+                f"Please create coordsystem.json for "
+                f"{bids_path.basename}"
+            )
         if datatype in ["meg", "eeg", "ieeg"]:
-            if coordsystem_fname is None:
-                raise RuntimeError(
-                    f"BIDS mandates that the coordsystem.json "
-                    f"should exist if electrodes.tsv does. "
-                    f"Please create coordsystem.json for "
-                    f"{bids_path.basename}"
-                )
             _read_dig_bids(
                 electrodes_fname, coordsystem_fname, raw=raw, datatype=datatype
             )
