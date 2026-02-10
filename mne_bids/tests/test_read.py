@@ -84,6 +84,7 @@ warning_str = dict(
     meas_date_set_to_none="ignore:.*'meas_date' set to None:RuntimeWarning:mne",
     nasion_not_found="ignore:.*nasion not found:RuntimeWarning:mne",
     maxshield="ignore:.*Internal Active Shielding:RuntimeWarning:mne",
+    change_format_to_eeglab="ignore:Converting data files to EEGLAB format:RuntimeWarning"
 )
 
 
@@ -1804,3 +1805,67 @@ def test_events_file_to_annotation_kwargs(tmp_path):
         np.sort(np.unique(ev_kwargs_default["description"])),
         np.sort(dext_f["value"].unique()),
     )
+
+
+@pytest.mark.filterwarnings(warning_str["channel_unit_changed"])
+@pytest.mark.filterwarnings(warning_str["change_format_to_eeglab"])
+@pytest.mark.filterwarnings(warning_str["nasion_not_found"])
+def test_read_ctf_coords_missing_fiducials(tmp_path):
+    """Test reading EEG BIDS with coordsystem 'CTF' saved as EEGLAB `.set`.
+
+    Create a lightweight EEG Raw with three channels, write as EEGLAB `.set`,
+    overwrite the generated `electrodes.tsv` with three channel positions
+    (treated as CTF coords), set the coordsystem to 'CTF', and then read back
+    with `read_raw_bids`. Verify fiducials are present and that EEG channel
+    positions in `raw.info['chs'][i]['loc'][:3]` match the expected
+    transformation from (x, y, z) -> (-y, x, z). Ensure all EEG dig points
+    are in head frame.
+    """
+    bids_path = _bids_path.copy().update(root=tmp_path, datatype="eeg", suffix="eeg")
+
+    # Create a small Raw with three EEG channels
+    ch_names = ["E1", "E2", "E3"]
+    info = mne.create_info(ch_names, sfreq=100.0, ch_types=["eeg"] * 3)
+    data = np.random.RandomState(0).standard_normal((3, 100)) * 1e-6
+    raw = mne.io.RawArray(data, info)
+
+    # Define original positions (x, y, z) in meters
+    orig_pos = np.array([[0.08, 0.00, 0.00], [0.00, 0.08, 0.00], [0.00, 0.00, 0.08]])
+
+    # Write initial montage so write_raw_bids creates sidecars
+    montage = mne.channels.make_dig_montage(ch_pos=dict(zip(ch_names, orig_pos)), coord_frame="ctf_head")
+    raw.set_montage(montage, on_missing="ignore")
+
+    # Write to BIDS as EEGLAB (.set)
+    write_raw_bids(raw, bids_path, overwrite=True, format="EEGLAB", allow_preload = True, verbose=False)
+
+    # Locate sidecars
+    coordsystem_fname = _find_matching_sidecar(bids_path, suffix="coordsystem", extension=".json")
+    electrodes_fname = _find_matching_sidecar(bids_path, suffix="electrodes", extension=".tsv")
+    assert coordsystem_fname is not None
+    assert electrodes_fname is not None
+
+    # Keep a copy of original channel locs (x,y,z)
+    orig_ch_locs = {ch: orig_pos[i].copy() for i, ch in enumerate(ch_names)}
+
+    # Read back the BIDS dataset
+    raw_read = read_raw_bids(bids_path=bids_path, verbose=False)
+
+    # Ensure fiducials are present
+    assert raw_read.info.get("dig") is not None
+    fiducials = [d for d in raw_read.info["dig"] if d["kind"] == FIFF.FIFFV_POINT_CARDINAL]
+    assert len(fiducials) >= 3
+
+    # Ensure all EEG dig points (sensor locations) are in head frame
+    head_frame = MNE_STR_TO_FRAME["head"]
+    for d in raw_read.info["dig"]:
+        if d["kind"] == FIFF.FIFFV_POINT_EEG:
+            assert d["coord_frame"] == head_frame
+
+    # Check transformed channel positions: expect (x,y,z) -> (-y, x, z)
+    for ch in ch_names:
+        idx = raw_read.ch_names.index(ch)
+        loc = np.asarray(raw_read.info["chs"][idx]["loc"][:3])
+        orig = orig_ch_locs[ch]
+        expected = np.array([-orig[1], orig[0], orig[2]])
+        assert np.allclose(loc, expected, atol=1e-6)
