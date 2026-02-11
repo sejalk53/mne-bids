@@ -11,6 +11,7 @@ from pathlib import Path
 
 import mne
 import numpy as np
+from mne._fiff._digitization import DigPoint
 from mne.io.constants import FIFF
 from mne.io.pick import _picks_to_idx
 from mne.utils import (
@@ -19,7 +20,6 @@ from mne.utils import (
     get_subjects_dir,
     logger,
 )
-from mne._fiff._digitization import DigPoint
 
 from mne_bids._fileio import _open_lock
 from mne_bids.config import (
@@ -868,6 +868,7 @@ _cardinal_ident_mapping = {
     FIFF.FIFFV_POINT_LPA: "lpa",
     FIFF.FIFFV_POINT_RPA: "rpa",
 }
+
 
 def _ensure_fiducials_ctf_head(dig):
     # Ensure that there are all three fiducials in the ctf_head coord frame

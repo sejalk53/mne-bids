@@ -84,7 +84,7 @@ warning_str = dict(
     meas_date_set_to_none="ignore:.*'meas_date' set to None:RuntimeWarning:mne",
     nasion_not_found="ignore:.*nasion not found:RuntimeWarning:mne",
     maxshield="ignore:.*Internal Active Shielding:RuntimeWarning:mne",
-    change_format_to_eeglab="ignore:Converting data files to EEGLAB format:RuntimeWarning"
+    change_format_eeglab="ignore:Converting data files to EEGLAB format:RuntimeWarning",
 )
 
 
@@ -1880,15 +1880,33 @@ def test_read_ctf_coords_missing_fiducials(tmp_path):
     orig_pos = np.array([[0.08, 0.00, 0.00], [0.00, 0.08, 0.00], [0.00, 0.00, 0.08]])
 
     # Write initial montage so write_raw_bids creates sidecars
-    montage = mne.channels.make_dig_montage(ch_pos=dict(zip(ch_names, orig_pos)), coord_frame="ctf_head")
+    montage = mne.channels.make_dig_montage(
+        ch_pos=dict(zip(ch_names, orig_pos)),
+        coord_frame="ctf_head",
+    )
     raw.set_montage(montage, on_missing="ignore")
 
     # Write to BIDS as EEGLAB (.set)
-    write_raw_bids(raw, bids_path, overwrite=True, format="EEGLAB", allow_preload = True, verbose=False)
+    write_raw_bids(
+        raw,
+        bids_path,
+        overwrite=True,
+        format="EEGLAB",
+        allow_preload=True,
+        verbose=False,
+    )
 
     # Locate sidecars
-    coordsystem_fname = _find_matching_sidecar(bids_path, suffix="coordsystem", extension=".json")
-    electrodes_fname = _find_matching_sidecar(bids_path, suffix="electrodes", extension=".tsv")
+    coordsystem_fname = _find_matching_sidecar(
+        bids_path,
+        suffix="coordsystem",
+        extension=".json",
+    )
+    electrodes_fname = _find_matching_sidecar(
+        bids_path,
+        suffix="electrodes",
+        extension=".tsv",
+    )
     assert coordsystem_fname is not None
     assert electrodes_fname is not None
 
@@ -1900,7 +1918,9 @@ def test_read_ctf_coords_missing_fiducials(tmp_path):
 
     # Ensure fiducials are present
     assert raw_read.info.get("dig") is not None
-    fiducials = [d for d in raw_read.info["dig"] if d["kind"] == FIFF.FIFFV_POINT_CARDINAL]
+    fiducials = [
+        d for d in raw_read.info["dig"] if d["kind"] == FIFF.FIFFV_POINT_CARDINAL
+    ]
     assert len(fiducials) >= 3
 
     # Ensure all EEG dig points (sensor locations) are in head frame
