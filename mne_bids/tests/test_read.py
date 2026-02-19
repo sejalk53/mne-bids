@@ -1855,7 +1855,7 @@ def test_events_file_to_annotation_kwargs(tmp_path):
 
 
 @pytest.mark.filterwarnings(warning_str["channel_unit_changed"])
-@pytest.mark.filterwarnings(warning_str["change_format_to_eeglab"])
+@pytest.mark.filterwarnings(warning_str["change_format_eeglab"])
 @pytest.mark.filterwarnings(warning_str["nasion_not_found"])
 def test_read_ctf_coords_missing_fiducials(tmp_path):
     """Test reading EEG BIDS with coordsystem 'CTF' saved as EEGLAB `.set`.
